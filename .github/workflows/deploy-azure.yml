@@ -55,6 +55,7 @@ jobs:
             --registry-login-server ${{ env.ACR_LOGIN_SERVER }} \
             --registry-username ${{ env.REGISTRY_USERNAME }} \
             --registry-password ${{ env.REGISTRY_PASSWORD }} \
+            --os-type Linux \
             --cpu 1 \
             --memory 1 \
             --ports 3001 \
