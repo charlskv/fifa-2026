@@ -31,6 +31,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
+      - name: ACR Login
+        run: az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY }}
+
+      - name: Check identity
+        run: |
+          az account show
+          az acr show --name ${{ env.AZURE_CONTAINER_REGISTRY }}
+    
       - name: Build backend TypeScript
         run: |
           cd backend
