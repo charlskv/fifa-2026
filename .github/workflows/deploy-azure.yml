@@ -1,0 +1,95 @@
+name: Deploy FIFA 2026 App to Azure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  AZURE_CONTAINER_REGISTRY: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+  AZURE_CONTAINER_REGISTRY_URL: ${{ secrets.AZURE_CONTAINER_REGISTRY_URL }}
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build backend TypeScript
+        run: |
+          cd backend
+          npm ci
+          npm run build
+          cd ..
+
+      - name: Build and push Docker image to ACR
+        run: |
+          az acr build \
+            --registry ${{ env.AZURE_CONTAINER_REGISTRY }} \
+            --image fifa-backend:${{ github.sha }} \
+            --image fifa-backend:latest \
+            --file backend/Dockerfile backend/
+
+      - name: Deploy to Container Instances
+        run: |
+          az container create \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name fifa-backend \
+            --image ${{ env.ACR_LOGIN_SERVER }}/fifa-backend:latest \
+            --registry-login-server ${{ env.ACR_LOGIN_SERVER }} \
+            --registry-username ${{ env.REGISTRY_USERNAME }} \
+            --registry-password ${{ env.REGISTRY_PASSWORD }} \
+            --cpu 1 \
+            --memory 1 \
+            --ports 3001 \
+            --protocol TCP \
+            --ip-address public \
+            --restart-policy OnFailure \
+            --environment-variables \
+              ALLOWED_ORIGINS="https://${{ secrets.STATIC_WEB_APP_DOMAIN }}" \
+            --no-wait
+
+      - name: Build frontend
+        working-directory: ./frontend
+        env:
+          VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        id: staticwebapp
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: 'frontend/dist'
+          api_location: ''
+          output_location: ''
+
+      - name: Get Container Instance URL
+        run: |
+          CONTAINER_IP=$(az container show \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name fifa-backend \
+            --query ipAddress.ip \
+            --output tsv)
+          echo "Backend deployed at: http://$CONTAINER_IP:3001"
+          echo "Update your Static Web App environment variable VITE_API_BASE to: https://$CONTAINER_IP.nip.io:3001 or configure a custom domain"
