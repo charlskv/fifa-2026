@@ -1,12 +1,6 @@
 {
-  "routes": [
-    {
-      "route": "/api/*",
-      "rewrite": "http://98.67.132.11:3001/api/*"
-    }
-  ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*", "/*.{css,js,png,svg,ico,woff2,webmanifest}"]
+    "exclude": ["/*.{css,js,png,svg,ico,woff2,webmanifest}"]
   }
 }

@@ -54,33 +54,57 @@ jobs:
             --image fifa-backend:latest \
             --file backend/Dockerfile backend/
 
-      - name: Deploy to Container Instances
+      - name: Deploy to Container Apps
         run: |
-          az container create \
+          # Ensure Container Apps CLI extension is available
+          az extension add --name containerapp --upgrade --only-show-errors
+
+          # Create Container Apps environment if it doesn't exist
+          az containerapp env create \
+            --name fifa-env \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --location germanywestcentral \
+            --only-show-errors || echo "Environment already exists, continuing..."
+
+          # Create or update the Container App
+          if az containerapp show --name fifa-backend --resource-group ${{ env.AZURE_RESOURCE_GROUP }} &>/dev/null; then
+            echo "Updating existing Container App..."
+            az containerapp update \
+              --name fifa-backend \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --image ${{ env.ACR_LOGIN_SERVER }}/fifa-backend:latest \
+              --set-env-vars ALLOWED_ORIGINS="https://${{ secrets.STATIC_WEB_APP_DOMAIN }}"
+          else
+            echo "Creating new Container App..."
+            az containerapp create \
+              --name fifa-backend \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --environment fifa-env \
+              --image ${{ env.ACR_LOGIN_SERVER }}/fifa-backend:latest \
+              --registry-server ${{ env.ACR_LOGIN_SERVER }} \
+              --registry-username ${{ env.REGISTRY_USERNAME }} \
+              --registry-password ${{ env.REGISTRY_PASSWORD }} \
+              --target-port 3001 \
+              --ingress external \
+              --min-replicas 1 \
+              --max-replicas 2 \
+              --env-vars ALLOWED_ORIGINS="https://${{ secrets.STATIC_WEB_APP_DOMAIN }}"
+          fi
+
+          # Get HTTPS URL and save for frontend build
+          BACKEND_FQDN=$(az containerapp show \
             --name fifa-backend \
-            --image ${{ env.ACR_LOGIN_SERVER }}/fifa-backend:latest \
-            --registry-login-server ${{ env.ACR_LOGIN_SERVER }} \
-            --registry-username ${{ env.REGISTRY_USERNAME }} \
-            --registry-password ${{ env.REGISTRY_PASSWORD }} \
-            --os-type Linux \
-            --cpu 1 \
-            --memory 1 \
-            --ports 3001 \
-            --protocol TCP \
-            --ip-address public \
-            --restart-policy OnFailure \
-            --environment-variables \
-              ALLOWED_ORIGINS="https://${{ secrets.STATIC_WEB_APP_DOMAIN }}" \
-            --no-wait
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          echo "BACKEND_URL=https://$BACKEND_FQDN" >> $GITHUB_ENV
+          echo "Backend deployed at: https://$BACKEND_FQDN"
 
       - name: Build frontend
         working-directory: ./frontend
-        env:
-          VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
         run: |
           npm ci
-          npm run build
+          VITE_API_BASE=${{ env.BACKEND_URL }} npm run build
 
       - name: Deploy to Azure Static Web Apps
         id: staticwebapp
